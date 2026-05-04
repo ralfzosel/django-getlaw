@@ -6,6 +6,9 @@ SECRET_KEY = "test-key-not-for-production"  # noqa: S105
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.admin",
     "django_getlaw",
 ]
 
@@ -21,12 +24,27 @@ CACHES = {
     },
 }
 
+MIDDLEWARE = [
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django_getlaw.middleware.GetlawAdminBannerMiddleware",
+]
+
+ROOT_URLCONF = "tests.urls"
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
         "DIRS": [],
         "APP_DIRS": True,
-        "OPTIONS": {"builtins": ["django_getlaw.templatetags.getlaw"]},
+        "OPTIONS": {
+            "builtins": ["django_getlaw.templatetags.getlaw"],
+            "context_processors": [
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
     },
 ]
 

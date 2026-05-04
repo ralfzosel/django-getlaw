@@ -51,8 +51,6 @@ _DEFAULTS: dict[str, Any] = {
     "CACHE_ALIAS": "default",
     "CACHE_KEY_PREFIX": "getlaw:",
     "USER_AGENT": None,  # filled in lazily with package version
-    "STALE_FALLBACK": False,
-    "STALE_MAX_AGE_SECONDS": 7 * 86400,
 }
 
 
@@ -79,8 +77,7 @@ def _api_key_for(text_type: str, conf: dict[str, Any]) -> str:
     key = keys.get(text_type)
     if not key:
         raise GetlawConfigurationError(
-            f"No API key configured for text type {text_type!r}. "
-            f"Add it to settings.GETLAW['KEYS']."
+            f"No API key configured for text type {text_type!r}. Add it to settings.GETLAW['KEYS']."
         )
     return str(key)
 
@@ -175,13 +172,32 @@ def _cache_key(text_type: str, api_key: str, conf: dict[str, Any]) -> str:
 
 
 def _store(text_type: str, api_key: str, content: str, conf: dict[str, Any]) -> None:
+    """Persist a fresh fetch and clear any prior failure markers on the entry."""
     entry = {
         "content": content,
         "fetched_at": int(time.time()),
         "api_version": conf["API_VERSION"],
+        "last_error": None,
+        "last_error_at": None,
     }
     # timeout=None: we manage freshness via fetched_at so we can serve stale
     # content as a fallback when the API is unreachable.
+    _cache(conf).set(_cache_key(text_type, api_key, conf), entry, timeout=None)
+
+
+def _record_failure(text_type: str, api_key: str, error_message: str, conf: dict[str, Any]) -> None:
+    """Record the most recent fetch failure on the cache entry (creating one if needed).
+
+    When there is no prior content, a marker entry with empty `content` is
+    written so `fetch_failures()` can still report the situation.
+    """
+    entry = _load(text_type, api_key, conf) or {
+        "content": "",
+        "fetched_at": 0,
+        "api_version": conf["API_VERSION"],
+    }
+    entry["last_error"] = error_message
+    entry["last_error_at"] = int(time.time())
     _cache(conf).set(_cache_key(text_type, api_key, conf), entry, timeout=None)
 
 
@@ -194,33 +210,39 @@ def get_text(text_type: str, *, force: bool = False) -> str:
 
     Lazy-refreshes the cache after `TTL_SECONDS`. When `force=True`, bypasses
     the freshness check and always calls the API. On API failure, falls back
-    to the last known content if `STALE_FALLBACK` is enabled and the stale
-    entry is younger than `STALE_MAX_AGE_SECONDS`.
+    to the last known content for as long as it remains in the cache and
+    records a failure marker so `GetlawAdminBannerMiddleware` can warn
+    staff. Raises only when no cached content is available at all.
 
     Raises:
         GetlawConfigurationError: if `text_type` has no API key configured.
-        GetlawAPIError: if the API call fails and no usable fallback exists.
+        GetlawAPIError: if the API call fails and no cached content exists.
     """
     cfg = _conf()
     api_key = _api_key_for(text_type, cfg)
     cached = _load(text_type, api_key, cfg)
     now = int(time.time())
 
-    if not force and cached and (now - int(cached.get("fetched_at", 0))) < cfg["TTL_SECONDS"]:
+    if (
+        not force
+        and cached
+        and cached.get("content")
+        and (now - int(cached.get("fetched_at", 0))) < cfg["TTL_SECONDS"]
+    ):
         return cached["content"]
 
     try:
         content = fetch_text(api_key, conf=cfg)
-    except GetlawAPIError:
-        if cfg["STALE_FALLBACK"] and cached:
+    except GetlawAPIError as exc:
+        _record_failure(text_type, api_key, str(exc), cfg)
+        if cached and cached.get("content"):
             age = now - int(cached.get("fetched_at", 0))
-            if age <= cfg["STALE_MAX_AGE_SECONDS"]:
-                logger.warning(
-                    "django-getlaw: serving stale %r (age=%ss) after fetch failure",
-                    text_type,
-                    age,
-                )
-                return cached["content"]
+            logger.warning(
+                "django-getlaw: serving stale %r (age=%ss) after fetch failure",
+                text_type,
+                age,
+            )
+            return cached["content"]
         raise
 
     _store(text_type, api_key, content, cfg)
@@ -230,3 +252,34 @@ def get_text(text_type: str, *, force: bool = False) -> str:
 def refresh_text(text_type: str) -> str:
     """Force-refresh `text_type` from the API and return the new HTML."""
     return get_text(text_type, force=True)
+
+
+def fetch_failures() -> list[dict[str, Any]]:
+    """Return one row per configured text type whose most recent fetch failed.
+
+    Each row contains: ``text_type``, ``last_error``, ``last_error_at``,
+    ``fetched_at``, ``age_seconds`` (since last successful fetch, or ``None``
+    if never), and ``has_content`` (True if a stale fallback is available).
+    Rows are returned in the same order as :func:`configured_text_types`.
+    """
+    cfg = _conf()
+    keys = cfg.get("KEYS") or {}
+    now = int(time.time())
+    rows: list[dict[str, Any]] = []
+    for text_type in configured_text_types():
+        api_key = str(keys[text_type])
+        entry = _load(text_type, api_key, cfg)
+        if not entry or not entry.get("last_error"):
+            continue
+        fetched_at = int(entry.get("fetched_at") or 0)
+        rows.append(
+            {
+                "text_type": text_type,
+                "last_error": entry["last_error"],
+                "last_error_at": int(entry.get("last_error_at") or 0),
+                "fetched_at": fetched_at,
+                "age_seconds": (now - fetched_at) if fetched_at else None,
+                "has_content": bool(entry.get("content")),
+            }
+        )
+    return rows
