@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-04
+
 ### Added
 
 - First release: `GETLAW` settings, `{% load getlaw %}{% getlaw "impressum" %}` tag, `get_text` / `refresh_text`, and `getlaw_refresh` management command; lazy cache with configurable TTL and key prefix.
@@ -24,3 +26,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - `GETLAW["STALE_FALLBACK"]` and `GETLAW["STALE_MAX_AGE_SECONDS"]` — no longer read; remove from settings (system checks warn if still present).
+
