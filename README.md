@@ -6,8 +6,8 @@ Django project.
 
 This is the Django counterpart to the official getLaw plugins for
 [WordPress](https://www.getlaw.de/api/wordpress/) and
-[Contao](https://www.getlaw.de/api/contao/). It calls the same public
-[getLaw API](https://www.getlaw.de/api/) (`/api/texts/{api_key}` with the
+[Contao](https://www.getlaw.de/api/contao/). It calls the same
+[getLaw client API](https://www.getlaw.de/api/) (`/api/texts/{api_key}` with the
 `X-getLaw-API-Version: 1` header), caches the response in your Django cache
 backend, and refreshes it lazily every 24 hours (configurable). A management
 command is provided for cron- or `django-q`-driven warming.
@@ -190,10 +190,11 @@ uv run ruff check
 ## Licence
 
 MIT — see [LICENSE](LICENSE). The upstream WordPress and Contao plugins by
-getLaw.de are GPL-3.0; this package contains no code from them — it was
-written from the public API contract.
+getLaw.de are GPL-3.0; this package contains no code from them — it simply
+calls the same client HTTP API (endpoint and headers) as those plugins. The
+[getLaw API page](https://www.getlaw.de/api/) is only a short overview.
 
 ## Acknowledgements
 
-Thanks to [getLaw.de](https://www.getlaw.de) for providing a clean public
-API.
+Thanks to [getLaw.de](https://www.getlaw.de) for providing a clean API for
+clients (paid subscription; requires an API key).

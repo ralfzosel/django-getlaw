@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README: describe getLaw as a client API (subscription and API key), not a
+  public one; refine the GPL separation note (same HTTP calls as the official
+  plugins; [getLaw API](https://www.getlaw.de/api/) overview is brief).
+
 ## [0.1.0] - 2026-05-04
 
 ### Added
