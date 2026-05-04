@@ -8,11 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial release of `django-getlaw`.
-- `GETLAW` settings dict to configure API keys for `impressum`, `datenschutz`, `agb`, `widerruf`, `barrierefreiheit` (or any future text type).
-- `{% load getlaw %}{% getlaw "impressum" %}` template tag returning safe HTML.
-- Programmatic helpers `get_text(text_type)` and `refresh_text(text_type)` exported from `django_getlaw`.
-- `python manage.py getlaw_refresh [text_type ...]` management command that warms the cache and exits non-zero on failure (suitable for cron / django-q).
-- Lazy 24h cache via Django's cache framework, with a configurable TTL and key prefix.
-- Optional stale-while-error fallback (`STALE_FALLBACK`, off by default) bounded by `STALE_MAX_AGE_SECONDS`.
-- Detects redirect responses from the API as invalid-key errors (matches getLaw's actual behavior).
+
+- First release: `GETLAW` settings, `{% load getlaw %}{% getlaw "impressum" %}` tag, `get_text` / `refresh_text`, and `getlaw_refresh` management command; lazy cache with configurable TTL and key prefix.
+- On upstream fetch failure, serve any cached HTML still in the cache (no maximum staleness), log a warning, and record `last_error` / `last_error_at` on the cache entry for observability.
+- `fetch_failures()` — returns per-text-type rows (`text_type`, `last_error`, `last_error_at`, `fetched_at`, `age_seconds`, `has_content`) for custom dashboards or health checks.
+- `GetlawAdminBannerMiddleware` (opt-in, after `MessageMiddleware`) — queues a `messages.warning` for staff on Django admin requests while any configured text has an outstanding fetch failure.
+- System checks `django_getlaw.W001` and `django_getlaw.W002` when `GETLAW` still contains obsolete `STALE_FALLBACK` or `STALE_MAX_AGE_SECONDS` keys.
+- Treat HTTP redirects from the API as failure (invalid key), matching getLaw’s behaviour.
+
+### Changed
+
+- Documentation: README describes stale fallback, admin middleware setup, and updated “How it works” flow.
+
+### Removed
+
+- `GETLAW["STALE_FALLBACK"]` and `GETLAW["STALE_MAX_AGE_SECONDS"]` — no longer read; remove from settings (system checks warn if still present).

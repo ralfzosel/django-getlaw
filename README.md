@@ -56,8 +56,6 @@ GETLAW = {
     "CACHE_ALIAS": "default",                          # any django CACHES alias
     "CACHE_KEY_PREFIX": "getlaw:",
     "USER_AGENT": "django-getlaw/<version>",           # auto-filled with package version
-    "STALE_FALLBACK": False,                           # serve stale on fetch failure
-    "STALE_MAX_AGE_SECONDS": 7 * 86400,                # max staleness when fallback is enabled
 }
 ```
 
@@ -108,6 +106,34 @@ uv run python manage.py getlaw_refresh impressum datenschutz
 The command exits with a non-zero status if any refresh fails — wire it into
 cron or your scheduler so failures alert you.
 
+### Admin banner on fetch failures
+
+`django-getlaw` always falls back to the last known content when an API
+fetch fails — there is no upper bound on staleness, because a slightly
+outdated Impressum is virtually always better than a blank page. To make
+sure the failure doesn't go unnoticed, add the bundled middleware after
+Django's messages middleware:
+
+```python
+# settings.py
+MIDDLEWARE = [
+    # ...
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django_getlaw.middleware.GetlawAdminBannerMiddleware",
+]
+```
+
+Any staff user (`request.user.is_staff`) visiting a Django admin page will
+see a warning banner listing the affected text types and the most recent
+error. The banner re-renders on every admin request and disappears as soon
+as a successful fetch (template tag, `refresh_text(...)`, or
+`getlaw_refresh`) clears the failure marker.
+
+If you need the failure list programmatically (e.g. for a status endpoint
+or your own dashboard), call `django_getlaw.fetch_failures()`.
+
 #### Scheduling with django-q
 
 ```python
@@ -142,9 +168,13 @@ type in the future.
    `content` field.
 4. On HTTP redirects (the way the getLaw API signals "invalid key"), HTTP
    errors, timeouts, or unparseable responses, the call raises a
-   `GetlawAPIError`. If `STALE_FALLBACK` is enabled and a stale entry exists
-   younger than `STALE_MAX_AGE_SECONDS`, that stale HTML is returned and a
-   warning is logged; otherwise the error propagates.
+   `GetlawAPIError`. If any cached content exists, it is returned as a
+   fallback (regardless of age), a warning is logged, and a per-text-type
+   failure marker is recorded so `GetlawAdminBannerMiddleware` can warn
+   staff on the next admin page. The marker clears the next time a fetch
+   succeeds. If nothing has ever been fetched successfully, the error
+   propagates and the template tag renders empty (or an HTML comment in
+   `DEBUG`).
 
 The cache key includes a hash of the API key, so rotating a key in your
 settings transparently invalidates the corresponding entry.
