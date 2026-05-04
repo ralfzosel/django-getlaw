@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Documentation: README describes stale fallback, admin middleware setup, and updated “How it works” flow.
+- `uv.lock`: editable `django-getlaw` package version aligned with `pyproject.toml` (`0.0.0`).
 
 ### Removed
 
