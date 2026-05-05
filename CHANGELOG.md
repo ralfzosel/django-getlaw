@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI: `.github/workflows/release.yml` builds the sdist and wheel on every
+  `v*` tag push and publishes to PyPI via OIDC Trusted Publishing — no API
+  token stored in the repo or in CI secrets.
+
+### Changed
+
+- README: clarify that lazy cache refresh needs no scheduler; add a scheduling
+  section (why `getlaw_refresh` on a cron or job runner is still recommended,
+  example crontab, Django-Q admin fields and `schedule()` snippet).
+
 ## [0.1.1] - 2026-05-04
 
 ### Changed
