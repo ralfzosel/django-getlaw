@@ -9,8 +9,10 @@ This is the Django counterpart to the official getLaw plugins for
 [Contao](https://www.getlaw.de/api/contao/). It calls the same
 [getLaw client API](https://www.getlaw.de/api/) (`/api/texts/{api_key}` with the
 `X-getLaw-API-Version: 1` header), caches the response in your Django cache
-backend, and refreshes it lazily every 24 hours (configurable). A management
-command is provided for cron- or `django-q`-driven warming.
+backend, and refreshes it lazily every 24 hours (configurable). You do **not**
+need a scheduler for correctness: the next page render after `TTL_SECONDS`
+will fetch fresh HTML. Scheduling the bundled management command is still
+recommended—see [Scheduling `getlaw_refresh`](#scheduling-getlaw_refresh).
 
 The package depends on **Django only** (no third-party HTTP client) and uses
 the standard library `urllib` so it works wherever Django works.
@@ -106,6 +108,69 @@ uv run python manage.py getlaw_refresh impressum datenschutz
 The command exits with a non-zero status if any refresh fails — wire it into
 cron or your scheduler so failures alert you.
 
+### Scheduling `getlaw_refresh`
+
+Lazy refresh is enough if traffic regularly hits every embedded text before the
+cache goes stale. A **scheduled** run is still recommended because:
+
+- **Latency** — After `TTL_SECONDS`, the first visitor pays the HTTP round-trip
+  to getLaw.de; a scheduled job refreshes the cache in the background so normal
+  page loads stay fast.
+- **Low-traffic pages** — Legal snippets on rarely opened URLs might otherwise
+  stay cached longer than you expect until someone loads that page.
+- **Failures you can alert on** — `getlaw_refresh` exits non-zero when a
+  refresh fails, so cron or your job runner can notify you. Lazy refresh alone
+  only triggers fetches when a page is rendered (you still get the admin
+  banner for staff if you enabled it, but no automatic ops alert unless you add
+  one).
+
+Pick one approach below.
+
+#### Cron (system scheduler)
+
+Run daily (or as often as you like) under the same Unix user and environment
+as the app. Example: every day at 03:00, log stdout/stderr:
+
+```bash
+0 3 * * * cd /path/to/your/project && /path/to/.venv/bin/python manage.py getlaw_refresh >> /var/log/getlaw_refresh.log 2>&1
+```
+
+Adjust paths; use `uv run python manage.py getlaw_refresh` if that is how you
+invoke Django in production. Point `$MAILTO` or your monitoring at non-zero
+exit codes from the cron job if you need alerts.
+
+#### Django-Q (admin or code)
+
+[Django-Q](https://github.com/Koed00/django-q) can run the same command on a
+schedule. The **`qcluster`** worker process must be running continuously;
+otherwise queued schedules never execute.
+
+**Admin UI:** Django admin → **Django Q** → **Scheduled tasks** → **Add**.
+
+| Field | Value |
+| --- | --- |
+| **Func** | `django.core.management.call_command` |
+| **Args** | `getlaw_refresh` — or `getlaw_refresh,impressum,datenschutz` to refresh only those types (comma-separated, same as CLI arguments after the command name). |
+| **Schedule type** | **Daily** — repeats every day at the **clock time** taken from **Next run** (the first run sets that time). Use **Weekly** / **Cron** if you prefer. |
+| **Next run** | Next datetime the job should run (project timezone). |
+| **Repeats** | `-1` for “forever”. |
+
+Leave **Cluster** blank unless you use [named clusters](https://django-q2.readthedocs.io/en/latest/configure.html).
+
+**Code:**
+
+```python
+from django_q.tasks import schedule
+from django_q.models import Schedule
+
+schedule(
+    "django.core.management.call_command",
+    "getlaw_refresh",
+    name="getlaw-refresh-daily",
+    schedule_type=Schedule.DAILY,
+)
+```
+
 ### Admin banner on fetch failures
 
 `django-getlaw` always falls back to the last known content when an API
@@ -133,20 +198,6 @@ as a successful fetch (template tag, `refresh_text(...)`, or
 
 If you need the failure list programmatically (e.g. for a status endpoint
 or your own dashboard), call `django_getlaw.fetch_failures()`.
-
-#### Scheduling with django-q
-
-```python
-from django_q.tasks import schedule
-from django_q.models import Schedule
-
-schedule(
-    "django.core.management.call_command",
-    "getlaw_refresh",
-    name="getlaw-refresh-daily",
-    schedule_type=Schedule.DAILY,
-)
-```
 
 ## Supported text types
 
