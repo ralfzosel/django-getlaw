@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- CI: bump `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact`
+  to v5 and `astral-sh/setup-uv` to v7 — silences the Node.js 20 deprecation
+  warning and keeps the release workflow working after Node 20 is removed from
+  GitHub-hosted runners in September 2026.
+
 ## [0.1.2] - 2026-05-05
 
 ### Added
