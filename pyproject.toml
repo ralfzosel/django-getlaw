@@ -1,6 +1,6 @@
 [project]
 name = "django-getlaw"
-version = "0.1.2"
+version = "0.1.3"
 description = "Embed legal texts (Impressum, Datenschutz, AGB, Widerruf, Barrierefreiheit) from getLaw.de in Django projects."
 readme = "README.md"
 authors = [
