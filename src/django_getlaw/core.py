@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -110,6 +111,20 @@ def fetch_text(api_key: str, *, conf: dict[str, Any] | None = None) -> str:
     Raises `GetlawAPIError` on any failure (network, HTTP, JSON, redirect,
     missing content). This function is stateless — no caching.
     """
+    return _fetch(api_key, conf=conf)[0]
+
+
+def _parse_lastupdate(value: Any) -> int | None:
+    """getLaw's ``lastupdate`` (a Unix timestamp, sent as a string), or ``None``."""
+    try:
+        timestamp = int(value)
+    except (TypeError, ValueError):
+        return None
+    return timestamp if timestamp > 0 else None
+
+
+def _fetch(api_key: str, *, conf: dict[str, Any] | None = None) -> tuple[str, int | None]:
+    """:func:`fetch_text` plus when getLaw last changed the text (``lastupdate``)."""
     if not api_key:
         raise GetlawConfigurationError("api_key must be a non-empty string")
 
@@ -154,7 +169,7 @@ def fetch_text(api_key: str, *, conf: dict[str, Any] | None = None) -> str:
     if not content or not isinstance(content, str):
         raise GetlawAPIError("getLaw API response is missing a non-empty 'content' field")
 
-    return content
+    return content, _parse_lastupdate(data.get("lastupdate"))
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +186,18 @@ def _cache_key(text_type: str, api_key: str, conf: dict[str, Any]) -> str:
     return f"{conf['CACHE_KEY_PREFIX']}{text_type}:{digest}"
 
 
-def _store(text_type: str, api_key: str, content: str, conf: dict[str, Any]) -> None:
+def _store(
+    text_type: str,
+    api_key: str,
+    content: str,
+    conf: dict[str, Any],
+    updated_at: int | None = None,
+) -> None:
     """Persist a fresh fetch and clear any prior failure markers on the entry."""
     entry = {
         "content": content,
         "fetched_at": int(time.time()),
+        "updated_at": updated_at,
         "api_version": conf["API_VERSION"],
         "last_error": None,
         "last_error_at": None,
@@ -232,7 +254,7 @@ def get_text(text_type: str, *, force: bool = False) -> str:
         return cached["content"]
 
     try:
-        content = fetch_text(api_key, conf=cfg)
+        content, updated_at = _fetch(api_key, conf=cfg)
     except GetlawAPIError as exc:
         _record_failure(text_type, api_key, str(exc), cfg)
         if cached and cached.get("content"):
@@ -245,8 +267,26 @@ def get_text(text_type: str, *, force: bool = False) -> str:
             return cached["content"]
         raise
 
-    _store(text_type, api_key, content, cfg)
+    _store(text_type, api_key, content, cfg, updated_at)
     return content
+
+
+def get_updated_at(text_type: str) -> datetime | None:
+    """When getLaw last changed `text_type` (aware, UTC), for a "Stand" line.
+
+    Read from the cache only, never from the API: the date arrives with each
+    fetch. ``None`` when the text is not cached, was cached by 0.1.x, or
+    getLaw sent no date.
+
+    Raises:
+        GetlawConfigurationError: if `text_type` has no API key configured.
+    """
+    cfg = _conf()
+    entry = _load(text_type, _api_key_for(text_type, cfg), cfg) or {}
+    updated_at = entry.get("updated_at")
+    if not updated_at:
+        return None
+    return datetime.fromtimestamp(int(updated_at), tz=timezone.utc)
 
 
 def refresh_text(text_type: str) -> str:

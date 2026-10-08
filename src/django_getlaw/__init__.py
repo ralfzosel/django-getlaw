@@ -7,6 +7,7 @@ from django_getlaw.core import (
     fetch_failures,
     fetch_text,
     get_text,
+    get_updated_at,
     refresh_text,
 )
 
@@ -20,6 +21,7 @@ __all__ = [
     "fetch_failures",
     "fetch_text",
     "get_text",
+    "get_updated_at",
     "refresh_text",
 ]
 
