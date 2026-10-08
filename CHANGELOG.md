@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `get_updated_at(text_type)` and the template tag
+  `{% getlaw_updated_at "datenschutz" as stand %}`: when getLaw last changed a
+  text, from the API's `lastupdate` field, stored with every fetch, for a
+  "Stand" line. Texts cached by 0.1.x have no date until their next fetch;
+  `getlaw_refresh` fills it at once.
+
 ## [0.1.3] - 2026-05-13
 
 ### Changed

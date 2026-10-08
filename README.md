@@ -85,14 +85,33 @@ returns an empty string in production (`DEBUG=False`) and a visible HTML
 comment when `DEBUG=True`, so problems are obvious in development without
 breaking pages in production.
 
+### "Stand" date
+
+getLaw sends with each text when it last changed it (`lastupdate`), and
+django-getlaw keeps that date with the cached text. For a "Stand" line:
+
+```django
+{% load getlaw %}
+{% getlaw "datenschutz" %}
+{% getlaw_updated_at "datenschutz" as stand %}
+{% if stand %}<p>Stand {{ stand|date:"d.m.Y" }}</p>{% endif %}
+```
+
+The tag gives an aware datetime, or an empty string when the date is unknown,
+so the line disappears instead of showing a wrong date. Texts cached by 0.1.x
+carry no date until their next fetch; `manage.py getlaw_refresh` fills it at
+once. The fetch time is no substitute: the text is fetched again every
+`TTL_SECONDS`, so that date moves forward every day.
+
 ### Programmatic API
 
 ```python
-from django_getlaw import get_text, refresh_text
+from django_getlaw import get_text, get_updated_at, refresh_text
 
 html = get_text("impressum")             # cached, lazy refresh after TTL
 html = get_text("impressum", force=True) # bypass TTL, fetch now
 html = refresh_text("impressum")         # alias for force-fetch
+when = get_updated_at("datenschutz")     # when getLaw last changed it, or None
 ```
 
 ### Management command
@@ -216,7 +235,8 @@ type in the future.
 3. Otherwise the package calls
    `GET https://www.getlaw.de/api/texts/{api_key}` with the
    `X-getLaw-API-Version: 1` header, parses the JSON response, and caches the
-   `content` field.
+   `content` field together with `lastupdate` (when getLaw last changed the
+   text).
 4. On HTTP redirects (the way the getLaw API signals "invalid key"), HTTP
    errors, timeouts, or unparseable responses, the call raises a
    `GetlawAPIError`. If any cached content exists, it is returned as a

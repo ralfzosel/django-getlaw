@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -17,6 +18,7 @@ from django_getlaw import (
     fetch_failures,
     fetch_text,
     get_text,
+    get_updated_at,
     refresh_text,
 )
 from django_getlaw.core import _cache_key, _conf, configured_text_types
@@ -202,6 +204,63 @@ def test_cache_key_changes_when_api_key_rotates():
 
 
 # ---------------------------------------------------------------------------
+# get_updated_at — getLaw's lastupdate
+# ---------------------------------------------------------------------------
+
+LASTUPDATE = 1790747229  # 2026-09-30 05:47:09 UTC
+LASTUPDATE_AT = datetime.fromtimestamp(LASTUPDATE, tz=timezone.utc)
+
+
+def _dated(content: str = "<p>D</p>") -> dict:
+    return {"error": False, "content": content, "lastupdate": str(LASTUPDATE)}
+
+
+def test_get_text_stores_lastupdate(fake_api):
+    fake_api.set_response(_dated())
+
+    get_text("datenschutz")
+
+    assert get_updated_at("datenschutz") == LASTUPDATE_AT
+
+
+@pytest.mark.parametrize("lastupdate", [None, "", "0", "soon"])
+def test_get_updated_at_is_none_without_a_usable_lastupdate(fake_api, lastupdate):
+    payload = {"error": False, "content": "<p>D</p>"}
+    if lastupdate is not None:
+        payload["lastupdate"] = lastupdate
+    fake_api.set_response(payload)
+
+    get_text("datenschutz")
+
+    assert get_updated_at("datenschutz") is None
+
+
+def test_get_updated_at_is_none_for_entries_cached_by_0_1():
+    cfg = _conf()
+    caches["default"].set(
+        _cache_key("datenschutz", cfg["KEYS"]["datenschutz"], cfg),
+        {"content": "<p>old</p>", "fetched_at": int(time.time())},
+        timeout=None,
+    )
+
+    assert get_updated_at("datenschutz") is None
+
+
+def test_stale_fallback_keeps_the_update_date(fake_api):
+    fake_api.set_response(_dated())
+    get_text("datenschutz")
+    fake_api.set_response(raises=URLError("connection refused"))
+
+    assert get_text("datenschutz", force=True) == "<p>D</p>"
+    assert get_updated_at("datenschutz") == LASTUPDATE_AT
+
+
+def test_get_updated_at_unknown_type_raises_configuration_error():
+    with pytest.raises(GetlawConfigurationError):
+        get_updated_at("nope")
+
+
+# ---------------------------------------------------------------------------
 # Template tag
 # ---------------------------------------------------------------------------
 
@@ -230,6 +289,26 @@ def test_template_tag_unknown_type_does_not_break_rendering():
     with override_settings(DEBUG=False):
         rendered = Template('{% load getlaw %}{% getlaw "nope" %}').render(Context())
     assert rendered == ""
+
+
+def test_updated_at_tag_renders_a_stand_line(fake_api):
+    fake_api.set_response(_dated())
+
+    rendered = Template(
+        '{% load getlaw %}{% getlaw "datenschutz" %}'
+        '{% getlaw_updated_at "datenschutz" as stand %}'
+        '{% if stand %} Stand {{ stand|date:"d.m.Y" }}{% endif %}'
+    ).render(Context())
+
+    assert rendered == "<p>D</p> Stand 30.09.2026"
+
+
+def test_updated_at_tag_is_empty_for_an_unknown_type():
+    rendered = Template(
+        '{% load getlaw %}{% getlaw_updated_at "nope" as stand %}[{{ stand }}]'
+    ).render(Context())
+
+    assert rendered == "[]"
 
 
 # ---------------------------------------------------------------------------
