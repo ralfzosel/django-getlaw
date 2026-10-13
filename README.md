@@ -9,10 +9,13 @@ This is the Django counterpart to the official getLaw plugins for
 [Contao](https://www.getlaw.de/api/contao/). It calls the same
 [getLaw client API](https://www.getlaw.de/api/) (`/api/texts/{api_key}` with the
 `X-getLaw-API-Version: 1` header), caches the response in your Django cache
-backend, and refreshes it lazily every 24 hours (configurable). You do **not**
-need a scheduler for correctness: the next page render after `TTL_SECONDS`
-will fetch fresh HTML. Scheduling the bundled management command is still
-recommended—see [Scheduling `getlaw_refresh`](#scheduling-getlaw_refresh).
+backend, and refreshes it every 24 hours (configurable). By default the
+refresh is lazy: the next page render after `TTL_SECONDS` fetches fresh HTML,
+so you do **not** need a scheduler for correctness. Where a page render must
+never wait on getLaw.de, set `REFRESH` to `"scheduled"` and let the bundled
+management command do every fetch—see
+[Refresh modes](#refresh-modes) and
+[Scheduling `getlaw_refresh`](#scheduling-getlaw_refresh).
 
 The package depends on **Django only** (no third-party HTTP client) and uses
 the standard library `urllib` so it works wherever Django works.
@@ -52,6 +55,7 @@ GETLAW = {
 
     # Optional, shown with their defaults:
     "TTL_SECONDS": 86400,                              # 24 hours
+    "REFRESH": "lazy",                                 # or "scheduled", see Refresh modes
     "API_BASE_URL": "https://www.getlaw.de/api/texts/",
     "API_VERSION": "1",
     "TIMEOUT_SECONDS": 10,
@@ -127,10 +131,34 @@ uv run python manage.py getlaw_refresh impressum datenschutz
 The command exits with a non-zero status if any refresh fails — wire it into
 cron or your scheduler so failures alert you.
 
+### Refresh modes
+
+`GETLAW["REFRESH"]` decides who fetches a text that is older than
+`TTL_SECONDS`:
+
+- **`"lazy"`** (default) — the first page render after `TTL_SECONDS` fetches
+  the text while the visitor waits (`TIMEOUT_SECONDS`, 10 s by default). If
+  that fetch fails, the stale text is served, and **every** following render
+  fetches again until one succeeds: during a getLaw.de outage each view of the
+  imprint page holds a worker for up to the timeout.
+- **`"scheduled"`** — a render serves the cached text whatever its age and
+  never calls getLaw.de; only `manage.py getlaw_refresh` and
+  `refresh_text()` / `get_text(..., force=True)` do. Use it where no public
+  view may call out, and schedule `getlaw_refresh` at least once per
+  `TTL_SECONDS` (below). A render still fetches when **nothing** is cached
+  (first deploy, cleared cache): an empty imprint is worse than one slow page.
+  Since nothing else would show a schedule that stopped running,
+  `GetlawAdminBannerMiddleware` warns staff about texts older than
+  `TTL_SECONDS` in this mode, and `overdue_texts()` lists them for your own
+  dashboard.
+
+An unknown value fails `manage.py check` (`django_getlaw.E001`).
+
 ### Scheduling `getlaw_refresh`
 
 Lazy refresh is enough if traffic regularly hits every embedded text before the
-cache goes stale. A **scheduled** run is still recommended because:
+cache goes stale. A **scheduled** run is still recommended, and with
+`REFRESH = "scheduled"` it is the only refresh there is, because:
 
 - **Latency** — After `TTL_SECONDS`, the first visitor pays the HTTP round-trip
   to getLaw.de; a scheduled job refreshes the cache in the background so normal
@@ -231,7 +259,9 @@ type in the future.
 1. The template tag / `get_text(...)` looks up the API key by text type in
    `GETLAW["KEYS"]`.
 2. It checks the configured Django cache for a fresh entry (newer than
-   `TTL_SECONDS`). If fresh, the cached HTML is returned.
+   `TTL_SECONDS`). If fresh, the cached HTML is returned. With
+   `REFRESH = "scheduled"`, any cached HTML is returned, however old; only
+   `getlaw_refresh` / `refresh_text()` go on to step 3.
 3. Otherwise the package calls
    `GET https://www.getlaw.de/api/texts/{api_key}` with the
    `X-getLaw-API-Version: 1` header, parses the JSON response, and caches the

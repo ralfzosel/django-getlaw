@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from django_getlaw.core import fetch_failures
+from django_getlaw.core import REFRESH_SCHEDULED, _conf, fetch_failures, overdue_texts
 
 logger = logging.getLogger("django_getlaw")
 
@@ -40,11 +40,15 @@ class GetlawAdminBannerMiddleware:
 
         try:
             failures = fetch_failures()
+            # Only the scheduled run renews texts in that mode, so a text past
+            # its TTL means the schedule stopped; in lazy mode the next render
+            # refreshes it and a banner would be noise.
+            overdue = overdue_texts() if _conf()["REFRESH"] == REFRESH_SCHEDULED else []
         except Exception:  # pragma: no cover - never break admin rendering
             logger.exception("django-getlaw: failed to evaluate fetch_failures()")
             return None
 
-        if not failures:
+        if not failures and not overdue:
             return None
 
         try:
@@ -52,14 +56,23 @@ class GetlawAdminBannerMiddleware:
         except ImportError:  # pragma: no cover - django.contrib.messages required
             return None
 
-        names = ", ".join(f["text_type"] for f in failures)
-        last_error = failures[0]["last_error"]
-        served_stale = any(f["has_content"] for f in failures)
-        prefix = "serving stale content" if served_stale else "no content available"
-        messages.warning(
-            request,
-            f"getLaw API: {prefix} for {names}. "
-            f"Last error: {last_error}. "
-            f"Fix the API key or connectivity, then run `python manage.py getlaw_refresh`.",
-        )
+        if failures:
+            names = ", ".join(f["text_type"] for f in failures)
+            last_error = failures[0]["last_error"]
+            served_stale = any(f["has_content"] for f in failures)
+            prefix = "serving stale content" if served_stale else "no content available"
+            messages.warning(
+                request,
+                f"getLaw API: {prefix} for {names}. "
+                f"Last error: {last_error}. "
+                f"Fix the API key or connectivity, then run `python manage.py getlaw_refresh`.",
+            )
+        if overdue:
+            names = ", ".join(row["text_type"] for row in overdue)
+            messages.warning(
+                request,
+                f"getLaw: {names} not refreshed within TTL_SECONDS. With REFRESH "
+                "'scheduled' only `python manage.py getlaw_refresh` renews texts: "
+                "check that it is scheduled and that the job runner is running.",
+            )
         return None

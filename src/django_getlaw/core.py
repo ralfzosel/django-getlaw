@@ -43,9 +43,17 @@ class GetlawAPIError(GetlawError):
 # Settings access
 # ---------------------------------------------------------------------------
 
+#: ``REFRESH`` modes. Lazy: the first render after ``TTL_SECONDS`` fetches the
+#: text while the page renders. Scheduled: a render never fetches a cached
+#: text, whatever its age; only ``getlaw_refresh`` / ``refresh_text()`` do.
+REFRESH_LAZY = "lazy"
+REFRESH_SCHEDULED = "scheduled"
+REFRESH_MODES = (REFRESH_LAZY, REFRESH_SCHEDULED)
+
 _DEFAULTS: dict[str, Any] = {
     "KEYS": {},
     "TTL_SECONDS": 86400,
+    "REFRESH": REFRESH_LAZY,
     "API_BASE_URL": "https://www.getlaw.de/api/texts/",
     "API_VERSION": "1",
     "TIMEOUT_SECONDS": 10,
@@ -63,6 +71,10 @@ def _conf() -> dict[str, Any]:
             f"settings.GETLAW must be a dict (got {type(user).__name__!r})"
         )
     merged = {**_DEFAULTS, **user}
+    if merged["REFRESH"] not in REFRESH_MODES:
+        raise GetlawConfigurationError(
+            f"settings.GETLAW['REFRESH'] must be one of {REFRESH_MODES}, got {merged['REFRESH']!r}"
+        )
     if merged["USER_AGENT"] is None:
         # Imported lazily to avoid a circular import at module load.
         from django_getlaw import __version__
@@ -230,11 +242,16 @@ def _load(text_type: str, api_key: str, conf: dict[str, Any]) -> dict[str, Any] 
 def get_text(text_type: str, *, force: bool = False) -> str:
     """Return the HTML for `text_type`, fetching from getLaw.de if needed.
 
-    Lazy-refreshes the cache after `TTL_SECONDS`. When `force=True`, bypasses
-    the freshness check and always calls the API. On API failure, falls back
-    to the last known content for as long as it remains in the cache and
-    records a failure marker so `GetlawAdminBannerMiddleware` can warn
-    staff. Raises only when no cached content is available at all.
+    With ``REFRESH = "lazy"`` (the default), lazy-refreshes the cache after
+    `TTL_SECONDS`. With ``REFRESH = "scheduled"``, a cached text is returned
+    whatever its age and only `force=True` (`refresh_text()`,
+    `getlaw_refresh`) calls the API, so a page render never waits on
+    getLaw.de; a fetch inside a render happens only when nothing is cached.
+    When `force=True`, bypasses the freshness check and always calls the
+    API. On API failure, falls back to the last known content for as long as
+    it remains in the cache and records a failure marker so
+    `GetlawAdminBannerMiddleware` can warn staff. Raises only when no cached
+    content is available at all.
 
     Raises:
         GetlawConfigurationError: if `text_type` has no API key configured.
@@ -245,13 +262,10 @@ def get_text(text_type: str, *, force: bool = False) -> str:
     cached = _load(text_type, api_key, cfg)
     now = int(time.time())
 
-    if (
-        not force
-        and cached
-        and cached.get("content")
-        and (now - int(cached.get("fetched_at", 0))) < cfg["TTL_SECONDS"]
-    ):
-        return cached["content"]
+    if not force and cached and cached.get("content"):
+        age = now - int(cached.get("fetched_at", 0))
+        if age < cfg["TTL_SECONDS"] or cfg["REFRESH"] == REFRESH_SCHEDULED:
+            return cached["content"]
 
     try:
         content, updated_at = _fetch(api_key, conf=cfg)
@@ -319,6 +333,37 @@ def fetch_failures() -> list[dict[str, Any]]:
                 "last_error_at": int(entry.get("last_error_at") or 0),
                 "fetched_at": fetched_at,
                 "age_seconds": (now - fetched_at) if fetched_at else None,
+                "has_content": bool(entry.get("content")),
+            }
+        )
+    return rows
+
+
+def overdue_texts() -> list[dict[str, Any]]:
+    """Return one row per configured text type not fetched within ``TTL_SECONDS``.
+
+    Meant for ``REFRESH = "scheduled"``, where only ``getlaw_refresh`` renews
+    a text: a row here means the scheduled run did not happen or failed. In
+    lazy mode the next render refreshes an overdue text itself. Each row
+    contains ``text_type``, ``fetched_at`` (0 if never fetched),
+    ``age_seconds`` (``None`` if never fetched) and ``has_content``. Rows are
+    returned in the same order as :func:`configured_text_types`.
+    """
+    cfg = _conf()
+    keys = cfg.get("KEYS") or {}
+    now = int(time.time())
+    rows: list[dict[str, Any]] = []
+    for text_type in configured_text_types():
+        entry = _load(text_type, str(keys[text_type]), cfg) or {}
+        fetched_at = int(entry.get("fetched_at") or 0)
+        age_seconds = (now - fetched_at) if fetched_at else None
+        if age_seconds is not None and age_seconds < cfg["TTL_SECONDS"]:
+            continue
+        rows.append(
+            {
+                "text_type": text_type,
+                "fetched_at": fetched_at,
+                "age_seconds": age_seconds,
                 "has_content": bool(entry.get("content")),
             }
         )

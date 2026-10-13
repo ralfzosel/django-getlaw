@@ -8,6 +8,7 @@ from django_getlaw.core import (
     fetch_text,
     get_text,
     get_updated_at,
+    overdue_texts,
     refresh_text,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
     "fetch_text",
     "get_text",
     "get_updated_at",
+    "overdue_texts",
     "refresh_text",
 ]
 

@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 from django.conf import settings
-from django.core.checks import Warning, register
+from django.core.checks import Error, Warning, register
 
 
 class GetlawConfig(AppConfig):
@@ -9,6 +9,7 @@ class GetlawConfig(AppConfig):
 
     def ready(self):
         register(_check_obsolete_settings)
+        register(_check_refresh_mode)
 
 
 _OBSOLETE_KEYS = {
@@ -36,4 +37,20 @@ def _check_obsolete_settings(app_configs, **kwargs):
         Warning(message, hint=hint, id=check_id)
         for key, (check_id, message, hint) in _OBSOLETE_KEYS.items()
         if key in user
+    ]
+
+
+def _check_refresh_mode(app_configs, **kwargs):
+    """An unknown ``REFRESH`` value would blank every text at render time."""
+    from django_getlaw.core import REFRESH_MODES
+
+    user = getattr(settings, "GETLAW", None)
+    if not isinstance(user, dict) or "REFRESH" not in user or user["REFRESH"] in REFRESH_MODES:
+        return []
+    return [
+        Error(
+            f"settings.GETLAW['REFRESH'] is {user['REFRESH']!r}.",
+            hint="Use " + " or ".join(repr(mode) for mode in REFRESH_MODES) + ".",
+            id="django_getlaw.E001",
+        )
     ]
