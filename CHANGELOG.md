@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `GETLAW["REFRESH"] = "scheduled"`: a page render serves the cached text
+  whatever its age and never calls getLaw.de; only `manage.py getlaw_refresh`
+  and `refresh_text()` renew a text. A render fetches only when nothing is
+  cached at all. For sites where no public view may call out: with the lazy
+  default, the first render after `TTL_SECONDS` fetched while the visitor
+  waited, and during a getLaw outage every render fetched again (10 s
+  timeout) until one succeeded. `"lazy"` stays the default.
+- `overdue_texts()`: the configured texts not fetched within `TTL_SECONDS`.
+  In scheduled mode `GetlawAdminBannerMiddleware` warns staff about them,
+  since nothing else would show a schedule that stopped running.
+- System check `django_getlaw.E001` for an unknown `REFRESH` value, which
+  would otherwise blank every text at render time.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added
